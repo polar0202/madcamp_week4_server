@@ -1,4 +1,4 @@
-"""Ghibli Diffusion: Canny(구조) + Ghibli(화풍) + LCM(속도) + IP-Adapter(색/일관성) + Seed."""
+"""Ghibli Diffusion: Img2Img + Canny(구조) + Ghibli(화풍) + LCM + IP-Adapter + Seed. 배경/인물 유지·눈 묘사 강화."""
 
 import io
 
@@ -16,18 +16,18 @@ IP_ADAPTER_WEIGHT = "ip-adapter_sd15.bin"
 
 class GhibliDiffusionEngine(BaseStyleEngine):
     """
-    1. Canny: 형태/포즈 고정
-    2. Ghibli Model: 지브리 화풍
-    3. LCM LoRA: 4~6 steps로 속도
-    4. IP-Adapter + Seed: 색/분위기 일관성
+    1. Img2Img + strength: 원본(배경·인물) 유지 강도 조절
+    2. Canny: 형태/포즈 고정
+    3. Ghibli + LCM + IP-Adapter + Seed
     """
 
     def __init__(
         self,
         content_size: int = 512,
-        controlnet_scale: float = 1.0,
-        guidance_scale: float = 1.0,
-        num_inference_steps: int = 6,
+        controlnet_scale: float = 0.85,
+        guidance_scale: float = 2.0,
+        num_inference_steps: int = 8,
+        strength: float = 0.7,
         canny_low: int = 100,
         canny_high: int = 200,
         ip_scale: float = 0.6,
@@ -39,18 +39,26 @@ class GhibliDiffusionEngine(BaseStyleEngine):
         self.controlnet_scale = controlnet_scale
         self.guidance_scale = guidance_scale
         self.num_inference_steps = num_inference_steps
+        self.strength = strength
         self.canny_low = canny_low
         self.canny_high = canny_high
         self.ip_scale = ip_scale
         self.default_seed = default_seed
 
         self._pipe = None
-        self._default_prompt = "ghibli style, anime, high quality, detailed"
-        self._default_negative_prompt = "ugly, blurry, low quality, distorted, deformed"
+        self._default_prompt = (
+            "ghibli style, anime, high quality, detailed, "
+            "detailed eyes, clear eyes, expressive eyes, well-defined eyes"
+        )
+        self._default_negative_prompt = (
+            "ugly, blurry, low quality, distorted, deformed, "
+            "bad eyes, deformed eyes, blurry eyes, missing eyes, asymmetric eyes, poorly drawn eyes, "
+            "different background, changed background, altered background, different scene"
+        )
 
     @property
     def name(self) -> str:
-        return "Ghibli Diffusion (Canny + LCM + IP-Adapter)"
+        return "Ghibli Diffusion (Img2Img + Canny + LCM + IP-Adapter)"
 
     @property
     def speed_rating(self) -> str:
@@ -61,9 +69,9 @@ class GhibliDiffusionEngine(BaseStyleEngine):
         return 5
 
     def load_models(self) -> None:
-        """Canny + Ghibli + LCM LoRA + IP-Adapter 로드."""
+        """Img2Img + Canny + Ghibli + LCM LoRA + IP-Adapter 로드."""
         try:
-            from diffusers import StableDiffusionControlNetPipeline, ControlNetModel
+            from diffusers import StableDiffusionControlNetImg2ImgPipeline, ControlNetModel
             from diffusers import LCMScheduler
         except ImportError:
             raise ImportError(
@@ -75,7 +83,7 @@ class GhibliDiffusionEngine(BaseStyleEngine):
             torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
         )
 
-        self._pipe = StableDiffusionControlNetPipeline.from_pretrained(
+        self._pipe = StableDiffusionControlNetImg2ImgPipeline.from_pretrained(
             "nitrosocke/Ghibli-Diffusion",
             controlnet=controlnet,
             torch_dtype=torch.float16 if self.device == "cuda" else torch.float32,
@@ -144,11 +152,13 @@ class GhibliDiffusionEngine(BaseStyleEngine):
         controlnet_scale: float | None = None,
         guidance_scale: float | None = None,
         num_inference_steps: int | None = None,
+        strength: float | None = None,
         seed: int | None = None,
         **kwargs
     ) -> bytes:
         """
-        Canny(구조) + IP-Adapter(색, content_image 사용) 항상 사용. IP-Adapter 옵션은 생성자/서버 고정.
+        Img2Img: image=원본, control_image=canny. strength 낮을수록 배경·인물 유지.
+        Canny + IP-Adapter 항상 사용. IP-Adapter 옵션은 생성자/서버 고정.
         """
         if self._pipe is None:
             self.load_models()
@@ -164,10 +174,9 @@ class GhibliDiffusionEngine(BaseStyleEngine):
         controlnet_scale = controlnet_scale if controlnet_scale is not None else self.controlnet_scale
         guidance_scale = guidance_scale if guidance_scale is not None else self.guidance_scale
         num_inference_steps = num_inference_steps if num_inference_steps is not None else self.num_inference_steps
+        strength = strength if strength is not None else self.strength
         seed = seed if seed is not None else self.default_seed
 
-        # IP-Adapter scale는 생성자에서 설정한 값만 사용 (API에서 변경 불가)
-        # IP-Adapter requires classifier-free guidance (guidance_scale > 1) for correct batch shape
         if guidance_scale <= 1.0:
             guidance_scale = 2.0
 
@@ -177,7 +186,9 @@ class GhibliDiffusionEngine(BaseStyleEngine):
             result = self._pipe(
                 prompt=prompt,
                 negative_prompt=negative_prompt,
-                image=canny_image,
+                image=content_image,
+                control_image=canny_image,
+                strength=strength,
                 ip_adapter_image=content_image,
                 num_inference_steps=num_inference_steps,
                 guidance_scale=guidance_scale,

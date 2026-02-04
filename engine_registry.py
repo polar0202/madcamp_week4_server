@@ -5,15 +5,14 @@ from pathlib import Path
 from typing import Dict, Type
 
 from engines.base_engine import BaseStyleEngine
-from engines.adain_engine import AdaINEngine
 from engines.ghibli_diffusion_engine import GhibliDiffusionEngine
 
 
 def _default_engine_from_env() -> str:
-    """Read default engine from DEFAULT_ENGINE env var. Fallback: adain."""
+    """Read default engine from DEFAULT_ENGINE env var. Fallback: ghibli_diffusion."""
     name = (os.environ.get("DEFAULT_ENGINE") or "").strip().lower()
-    allowed = {"adain", "ghibli_diffusion"}
-    return name if name in allowed else "adain"
+    allowed = {"ghibli_diffusion"}
+    return name if name in allowed else "ghibli_diffusion"
 
 
 class EngineRegistry:
@@ -22,7 +21,6 @@ class EngineRegistry:
     def __init__(self):
         self._engines: Dict[str, BaseStyleEngine] = {}
         self._engine_classes: Dict[str, Type[BaseStyleEngine]] = {
-            "adain": AdaINEngine,
             "ghibli_diffusion": GhibliDiffusionEngine,
         }
         self._default_engine_name = _default_engine_from_env()

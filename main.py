@@ -13,13 +13,9 @@ from fastapi.responses import Response
 
 from engine_registry import registry
 
-# Configuration
-MODELS_DIR = Path(__file__).parent / "models"
-STYLES_DIR = Path(__file__).parent / "styles"
-
 app = FastAPI(
-    title="Multi-Engine Style Transfer Server",
-    description="Support multiple style transfer engines (AdaIN, Ghibli Diffusion, etc.)",
+    title="Ghibli Style Transfer Server",
+    description="Ghibli Diffusion style transfer (Img2Img + Canny + LCM + IP-Adapter)",
     version="0.3.0",
 )
 
@@ -61,7 +57,7 @@ async def list_engines():
 @app.get("/health")
 async def health():
     try:
-        kwargs = {"models_dir": MODELS_DIR} if registry.default_engine_name == "adain" else {"content_size": 512}
+        kwargs = {"content_size": 512}
         default_engine = registry.get_default_engine(**kwargs)
         return {
             "status": "ok",
@@ -78,10 +74,6 @@ async def health():
 async def stylize(
     content_image: UploadFile = File(...),
     engine: str | None = Form(None),
-    # AdaIN parameters
-    style_image: UploadFile | None = File(None),
-    alpha: float = Form(1.0),
-    # Ghibli Diffusion (Canny + LCM + IP-Adapter 고정 사용)
     prompt: str = Form(None),
     negative_prompt: str = Form(None),
     controlnet_scale: float = Form(1.0),
@@ -90,62 +82,32 @@ async def stylize(
     seed: int = Form(42),
 ):
     """
-    Engine: 'adain' or 'ghibli_diffusion'
-    Ghibli: Canny + LCM + IP-Adapter 항상 사용 (IP-Adapter 옵션은 서버 고정)
+    Ghibli Diffusion: Canny + LCM + IP-Adapter 고정 사용.
     """
     engine = engine or registry.default_engine_name
     content_bytes = await content_image.read()
     
     try:
-        # Get engine with appropriate config
-        if engine == "adain":
-            engine_instance = registry.get_engine(
-                "adain",
-                models_dir=MODELS_DIR,
-                content_size=384,
-                style_size=384,
-                alpha=alpha,
-            )
-            
-            # Load default style if exists
-            if not hasattr(engine_instance, '_default_style_loaded'):
-                default_style_path = STYLES_DIR / "default.jpg"
-                if default_style_path.exists():
-                    with open(default_style_path, "rb") as f:
-                        engine_instance.set_default_style(f.read())
-                engine_instance._default_style_loaded = True
-            
-            style_bytes = None
-            if style_image:
-                style_bytes = await style_image.read()
-            
-            result = engine_instance.stylize(
-                content_image=content_bytes,
-                style_image=style_bytes,
-                alpha=alpha,
-            )
-        
-        elif engine == "ghibli_diffusion":
-            engine_instance = registry.get_engine(
-                "ghibli_diffusion",
-                content_size=512,
-                controlnet_scale=controlnet_scale,
-                guidance_scale=guidance_scale,
-                num_inference_steps=num_inference_steps,
-                default_seed=seed,
-            )
-            result = engine_instance.stylize(
-                content_image=content_bytes,
-                prompt=prompt,
-                negative_prompt=negative_prompt,
-                controlnet_scale=controlnet_scale,
-                guidance_scale=guidance_scale,
-                num_inference_steps=num_inference_steps,
-                seed=seed,
-            )
-        
-        else:
+        if engine != "ghibli_diffusion":
             raise HTTPException(status_code=400, detail=f"Unknown engine: {engine}")
+        
+        engine_instance = registry.get_engine(
+            "ghibli_diffusion",
+            content_size=512,
+            controlnet_scale=controlnet_scale,
+            guidance_scale=guidance_scale,
+            num_inference_steps=num_inference_steps,
+            default_seed=seed,
+        )
+        result = engine_instance.stylize(
+            content_image=content_bytes,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            controlnet_scale=controlnet_scale,
+            guidance_scale=guidance_scale,
+            num_inference_steps=num_inference_steps,
+            seed=seed,
+        )
         
         return Response(content=result, media_type="image/jpeg")
     
@@ -159,38 +121,29 @@ async def stylize(
 async def stylize_fast(
     content_image: UploadFile = File(...),
     engine: str | None = Form(None),
-    alpha: float = Form(1.0),
     controlnet_scale: float = Form(1.0),
     seed: int = Form(42),
 ):
     """
-    Fast mode. Ghibli: LCM 6 steps + IP-Adapter 항상 사용 (옵션 고정).
+    Fast mode. Ghibli: LCM 6 steps + IP-Adapter 고정.
     """
     engine = engine or registry.default_engine_name
     content_bytes = await content_image.read()
     
     try:
-        if engine == "adain":
-            engine_instance = registry.get_engine("adain", models_dir=MODELS_DIR)
-            result = engine_instance.stylize(
-                content_image=content_bytes,
-                alpha=alpha,
-            )
-        
-        elif engine == "ghibli_diffusion":
-            engine_instance = registry.get_engine(
-                "ghibli_diffusion",
-                num_inference_steps=6,
-            )
-            result = engine_instance.stylize(
-                content_image=content_bytes,
-                controlnet_scale=controlnet_scale,
-                num_inference_steps=6,
-                seed=seed,
-            )
-        
-        else:
+        if engine != "ghibli_diffusion":
             raise HTTPException(status_code=400, detail=f"Unknown engine: {engine}")
+        
+        engine_instance = registry.get_engine(
+            "ghibli_diffusion",
+            num_inference_steps=6,
+        )
+        result = engine_instance.stylize(
+            content_image=content_bytes,
+            controlnet_scale=controlnet_scale,
+            num_inference_steps=6,
+            seed=seed,
+        )
         
         return Response(content=result, media_type="image/jpeg")
     
@@ -206,9 +159,8 @@ async def websocket_endpoint(websocket: WebSocket):
     WebSocket protocol for real-time style transfer.
     
     Send (JSON):
-    - {"type": "set_engine", "engine": "adain|ghibli_diffusion"}
+    - {"type": "set_engine", "engine": "ghibli_diffusion"}
     - {"type": "content", "data": "<base64 image>"}
-    - {"type": "style", "data": "<base64 image>"} (AdaIN only)
     - {"type": "stylize", ...params...}
     
     Receive (JSON):
@@ -239,8 +191,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue
 
             if msg_type == "set_engine":
-                engine_name = msg.get("engine", "adain")
-                if engine_name in ["adain", "ghibli_diffusion"]:
+                engine_name = msg.get("engine", "ghibli_diffusion")
+                if engine_name == "ghibli_diffusion":
                     current_engine = engine_name
                     await websocket.send_json({
                         "type": "ack",
@@ -274,16 +226,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
 
                 try:
-                    if current_engine == "adain":
-                        engine_instance = registry.get_engine("adain", models_dir=MODELS_DIR)
-                        alpha = msg.get("alpha", 1.0)
-                        result = engine_instance.stylize(
-                            content_image=pending_content,
-                            style_image=pending_style,
-                            alpha=alpha,
-                        )
-                    
-                    elif current_engine == "ghibli_diffusion":
+                    if current_engine == "ghibli_diffusion":
                         engine_instance = registry.get_engine(
                             "ghibli_diffusion",
                             content_size=512,

@@ -2,6 +2,7 @@
 
 import json
 import logging
+import time
 import traceback
 from pathlib import Path
 
@@ -99,6 +100,7 @@ async def stylize(
             num_inference_steps=num_inference_steps,
             default_seed=seed,
         )
+        t0 = time.perf_counter()
         result = engine_instance.stylize(
             content_image=content_bytes,
             prompt=prompt,
@@ -108,7 +110,8 @@ async def stylize(
             num_inference_steps=num_inference_steps,
             seed=seed,
         )
-        
+        inference_ms = int((time.perf_counter() - t0) * 1000)
+        print(f"[stylize] inference_ms={inference_ms}", flush=True)
         return Response(content=result, media_type="image/jpeg")
     
     except Exception as e:
@@ -138,13 +141,15 @@ async def stylize_fast(
             "ghibli_diffusion",
             num_inference_steps=6,
         )
+        t0 = time.perf_counter()
         result = engine_instance.stylize(
             content_image=content_bytes,
             controlnet_scale=controlnet_scale,
             num_inference_steps=6,
             seed=seed,
         )
-        
+        inference_ms = int((time.perf_counter() - t0) * 1000)
+        print(f"[stylize_fast] inference_ms={inference_ms}", flush=True)
         return Response(content=result, media_type="image/jpeg")
     
     except Exception as e:
